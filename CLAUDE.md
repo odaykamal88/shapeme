@@ -9,6 +9,11 @@ A feature that fails any of the three doesn't ship, however clever.
 Personal Telegram bot + dashboard on Vercel (plain Node functions in `api/`, no framework; static `public/index.html`).
 Storage: Postgres on Neon (`DATABASE_URL`, via the Vercel Marketplace), see `lib/store.js`: tables events (one row per event, JSONB), measurements, docs (small mutable docs: owner, profile, equipment, bests, pin, msgmap…), seen (dedupe keys), photos (base64). Tables are created on first use. The old Vercel Blob store hit the Hobby quota (Nov 24, 2026: blob-as-database used ~10k reads in 6 days) and was suspended; `lib/blobstore.js` is kept only so the nightly job can import that history once the quota resets (doc `legacy_imported` marks it done; manual: `/api/admin?import_legacy=1`). Claude API via fetch (`lib/claude.js`).
 
+## Repo and deploys
+- Code lives in GitHub `odaykamal88/shapeme` (private), linked to the Vercel project `odey-body-tracker`: a push to `main` deploys production; other branches get preview deployments. Never commit `.secrets.local` / `.keys.local` (gitignored).
+- Previews share the production database but have no Telegram token (they can never message him). Preview tests need ANTHROPIC_API_KEY + DASHBOARD_KEY enabled for Preview and a protection bypass (preview links sit behind Vercel login): both are his call in Vercel settings.
+- After every push: wait for READY, then run `tests/parser-check.mjs`.
+
 ## First deploy
 Run `bash setup.sh` (asks for the Telegram bot token and Anthropic key, generates the rest, deploys, registers the webhook).
 If the user already deployed an earlier version: just `npx vercel deploy --prod`. Data from v1 is compatible (old workout format is read by `setsOf`).
