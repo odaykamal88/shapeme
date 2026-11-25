@@ -1,0 +1,19 @@
+[
+  { "text": "Need to log in yesterday's evening meal: two plates of rice, chicken and salad, about 1,900 kcal", "expect": [{ "kind": "food", "date": "$yesterday", "cheat": false }] },
+  { "text": "heavy dinner, two plates and 2 glasses of wine", "expect": [{ "kind": "food", "cheat": false }] },
+  { "text": "feast tonight: mixed grill and dessert", "expect": [{ "kind": "feast" }] },
+  { "text": "yesterday was about 8k steps", "expect": [{ "kind": "steps", "steps": 8000, "date": "$yesterday" }] },
+  { "text": "can you add 8k steps for yesterday?", "expect": [{ "kind": "steps", "steps": 8000, "date": "$yesterday" }] },
+  { "text": "Treadmill 15min 15% incline 100kcals 0.88km covered 3.1.km/hr pace", "expect": [{ "kind": "workout", "exercises~": "treadmill" }] },
+  { "text": "can you log the treadmill, 20 min at 12% incline, 1.1 km", "expect": [{ "kind": "workout", "exercises~": "treadmill" }] },
+  { "text": "steps 9200, that includes the treadmill", "expect": [{ "kind": "steps", "steps": 9200, "includes_treadmill": true }] },
+  { "text": "steps today 7400", "expect": [{ "kind": "steps", "steps": 7400, "includes_treadmill": false }] },
+  { "text": "working out from home today", "expect": [{ "kind": "location", "train_here": true }] },
+  { "text": "remind me at 7", "expect": [{ "kind": "snooze" }] },
+  { "text": "send my report", "expect": [{ "kind": "report", "what": "pdf" }] },
+  { "text": "what were my original goals?", "expect": [{ "kind": "report", "what": "goals" }] },
+  { "text": "how am I doing on protein this week?", "expect": [{ "kind": "query" }] },
+  { "text": "77.6 slept 7h20 hrv 58", "expect": [{ "kind": "recovery" }] },
+  { "text": "dips were 3x8, no negatives", "expect": [{ "kind": "workout", "exercises~": "dip" }] },
+  { "text": "show me today's workout", "expect": [{ "kind": "show_plan" }] }
+]

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Body tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --ink:#e8eaef; --mute:#8a90a0; --line:#2a2f3a; --a:#4ea1ff; --b:#f5a524; --good:#3ecf8e; --bad:#ff6b6b; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f7f9; --card:#fff; --ink:#151821; --mute:#626a7b; --line:#e3e6ec; } }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 60px }
+  h1 { font-size:20px; margin:0 0 4px } .sub { color:var(--mute); margin-bottom:18px }
+  .grid { display:grid; gap:12px } .k { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)) } .c2 { grid-template-columns:repeat(auto-fit,minmax(340px,1fr)) }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px }
+  .lab { color:var(--mute); font-size:12px; text-transform:uppercase; letter-spacing:.04em } .val { font-size:26px; font-weight:650; margin-top:2px } .tgt { color:var(--mute); font-size:12px }
+  .ok { color:var(--good) } .no { color:var(--bad) }
+  h2 { font-size:14px; margin:0 0 10px; color:var(--mute); font-weight:600 }
+  table { width:100%; border-collapse:collapse; font-size:13px } td,th { padding:6px 4px; border-bottom:1px solid var(--line); text-align:left } td.n { text-align:right; font-variant-numeric:tabular-nums }
+  .phase { padding:10px 14px; border-radius:10px; background:var(--card); border:1px solid var(--line); margin-bottom:12px }
+  canvas { max-height:260px }
+  h3 { font-size:16px; margin:26px 0 10px }
+  .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:4px } .cal div { border-radius:6px; padding:4px; font-size:11px; text-align:center; border:1px solid var(--line) }
+  .cal .s { background:color-mix(in srgb, var(--good) 35%, transparent) } .cal .m { box-shadow: inset 0 -4px 0 var(--a) } .cal .t { outline:2px solid var(--ink) }
+  .bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden; min-width:80px } .bar i { display:block; height:100%; background:var(--good) }
+  ul.plan { margin:0; padding-left:18px } ul.plan li { margin:3px 0 }
+  .flags { border-color:color-mix(in srgb, var(--bad) 55%, var(--line)); margin-bottom:12px } .flags ul { margin:6px 0 0; padding-left:18px } .flags li { margin:3px 0 }
+  .note { color:var(--mute); font-size:12px; margin-top:6px } .tag { font-size:11px; padding:1px 6px; border-radius:6px; background:color-mix(in srgb, var(--b) 25%, transparent); margin-left:6px }
+  .rows div { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:1px solid var(--line); font-size:13px } .rows div:last-child { border:0 }
+  .strip { display:grid; grid-template-columns:repeat(14,1fr); gap:3px; font-size:11px; text-align:center } .strip span { padding:3px 0; border-radius:4px; border:1px solid var(--line) }
+</style>
+</head>
+<body><main>
+<h1>Body tracker</h1><div class="sub" id="sub">Loading…</div>
+<div class="phase" id="phase"></div>
+<div class="card flags" id="flags" hidden></div>
+<h3>Training</h3>
+<div class="grid k" id="tkpis"></div>
+<div class="grid c2" style="margin-top:12px">
+  <div class="card"><h2>Today's session</h2><div id="today"></div></div>
+  <div class="card"><h2>Next 7 days</h2><div class="rows" id="next"></div><div class="note" id="adjust"></div></div>
+  <div class="card"><h2>Last 28 days (green = session, blue line = morning routine)</h2><div class="cal" id="cal"></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>Skill ladders, best vs target</h2><table id="lad"></table></div>
+  <div class="card"><h2>Belt-loaded lifts and hammer curl (added kg)</h2><canvas id="clift"></canvas></div>
+  <div class="card"><h2>Holds (seconds)</h2><canvas id="chold"></canvas></div>
+</div>
+<h3>Diet this week (Sun–Sat)</h3>
+<div class="grid k" id="dkpis"></div>
+<div class="grid c2" style="margin-top:12px">
+  <div class="card"><h2>Eaten vs target, this week</h2><canvas id="cdw"></canvas></div>
+  <div class="card"><h2>Weekly diet review</h2><div id="dplan"></div></div>
+</div>
+<h3>Recovery</h3>
+<div class="grid k" id="rkpis"></div>
+<div class="grid c2" style="margin-top:12px">
+  <div class="card"><h2>Sleep (hours)</h2><canvas id="csl"></canvas></div>
+  <div class="card"><h2>HRV (ms, Elite HRV rMSSD) and resting heart rate</h2><canvas id="chrv"></canvas></div>
+  <div class="card" style="grid-column:1/-1"><h2>Last 14 mornings: morning wood · energy (1–5) · knee pain (0–10)</h2><div id="rstrip"></div></div>
+</div>
+<h3>Body and food</h3>
+<div class="grid k" id="kpis"></div>
+<div class="grid c2" style="margin-top:12px">
+  <div class="card"><h2>Weight (kg) and waist (in)</h2><canvas id="cw"></canvas></div>
+  <div class="card"><h2>Shoulder ÷ waist ratio, arms (in)</h2><canvas id="cr"></canvas></div>
+  <div class="card"><h2>Daily calories by setting, last 21 days</h2><canvas id="ck"></canvas></div>
+  <div class="card"><h2>Daily protein (g)</h2><canvas id="cp"></canvas></div>
+  <div class="card"><h2>Biggest calorie items, last 14 days</h2><table id="top"></table></div>
+  <div class="card"><h2>Where the calories come from, last 14 days</h2><canvas id="cs"></canvas></div>
+  <div class="card"><h2>Steps</h2><canvas id="cst"></canvas></div>
+  <div class="card"><h2>Sets per muscle, last 7 days</h2><canvas id="cm"></canvas></div>
+</div>
+<script>
+// The key lives in the #fragment (never sent to the server) or this browser's storage, and goes out as a header.
+let key = new URLSearchParams(location.hash.slice(1)).get('key') || new URLSearchParams(location.search).get('key');
+try { if (key) localStorage.setItem('bt_key', key); else key = localStorage.getItem('bt_key'); } catch (e) {}
+if (location.search.includes('key=') || location.hash.includes('key=')) history.replaceState(null, '', location.pathname);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const COLORS = { home:'#4ea1ff', restaurant:'#f5a524', social:'#ff6b6b', on_the_go:'#a78bfa', unknown:'#8a90a0' };
+Chart.defaults.color = css('--mute'); Chart.defaults.borderColor = css('--line'); Chart.defaults.font.family = 'inherit';
+const fmt = n => n == null ? '–' : Math.round(n).toLocaleString('en-US');
+const ymd = d => d.toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const wd = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+
+fetch('/api/data', { headers: { 'x-dashboard-key': key || '' } }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(render)
+  .catch(e => document.getElementById('sub').textContent = 'Could not load (' + e + '). Open the dashboard link with #key=YOUR_DASHBOARD_KEY at the end.');
+
+function kpi(label, val, target, good) {
+  return `<div class="card"><div class="lab">${label}</div><div class="val ${good == null ? '' : good ? 'ok' : 'no'}">${val}</div><div class="tgt">${target}</div></div>`;
+}
+
+function lineSeries(series, keys, labels) {
+  const dates = [...new Set(keys.flatMap(k => (series[k] || []).map(p => p.date)))].sort();
+  const pal = [css('--a'), css('--b'), css('--good'), '#a78bfa', '#ff6b6b', '#2dd4bf'];
+  return { labels: dates.map(x => x.slice(5)), datasets: keys.map((k, i) => {
+    const m = Object.fromEntries((series[k] || []).map(p => [p.date, p.value]));
+    return { label: labels[i], data: dates.map(x => m[x] ?? null), borderColor: pal[i], spanGaps: true, tension: .25 };
+  }) };
+}
+
+function renderTraining(T) {
+  const A = T.adherence;
+  document.getElementById('tkpis').innerHTML = [
+    kpi('Gym (7d)', `${A.sessions7}`, `aim 4–5 · A → B → C → D`, A.sessions7 >= 4),
+    kpi('Home (7d)', `${A.home7 ?? 0}`, 'aim 3–5 · H1 → H2 → H3', (A.home7 ?? 0) >= 3),
+    kpi('Morning streak', `${A.morningStreak} d`, `${A.mornings7}/7 this week`, A.mornings7 >= 6),
+    kpi('Block', T.block ? T.block.name : (ymd(new Date()) < T.blocks[0].from ? 'Not started' : 'Plan ended'), T.block ? `${T.block.from.slice(5)} → ${T.block.to.slice(5)}` : (ymd(new Date()) < T.blocks[0].from ? `Build 1 starts ${T.blocks[0].from.slice(5)}` : 'update lib/plan.js'), null),
+    kpi('Skill targets hit', `${T.ladders.filter(l => l.done).length}/${T.ladders.filter(l => l.target != null).length}`, 'see ladders below', null)
+  ].join('');
+  document.getElementById('today').innerHTML = `<b>${esc(T.today.name)}</b>${T.today.adapted ? '<span class="tag">adjusted</span>' : ''}${T.today.reason ? `<div class="tgt">${esc(T.today.reason)}</div>` : ''}${T.block?.note ? `<div class="tgt">${esc(T.block.note)}</div>` : ''}<ul class="plan">${T.today.exercises.map(e => `<li>${esc(e.name)} <span class="tgt">${esc(e.target)}</span></li>`).join('')}</ul>`;
+  document.getElementById('next').innerHTML = T.next.map(n => `<div><span>${wd(n.date)} ${n.date.slice(8)}</span><span>${esc(n.name)}${n.adapted && n.reason ? `<span class="tag" title="${esc(n.reason)}">adjusted</span>` : ''}</span></div>`).join('');
+  document.getElementById('adjust').innerHTML = T.lastAdjust ? `Last re-plan ${T.lastAdjust.date.slice(5)}: ${esc(T.lastAdjust.summary)}` : 'No re-plans yet: the plan adjusts itself when you train differently, or send /adjust.';
+  const t = ymd(new Date());
+  document.getElementById('cal').innerHTML = A.calendar.map(r =>
+    `<div class="${r.session ? 's' : ''} ${r.morning ? 'm' : ''} ${r.date === t ? 't' : ''}" title="${r.date} · ${r.planned}${r.block ? ' · ' + r.block : ''}">${r.date.slice(8)}<br><span class="tgt">${r.planned.replace('upper', 'U').replace('legs', 'L').replace('sunday', 'Sun')}</span></div>`).join('');
+  const u = l => l.unit === 'reps' ? '' : l.unit === 'kg' ? ' kg' : ' s';
+  document.getElementById('lad').innerHTML = '<tr><th>Skill</th><th class="n">Best</th><th class="n">Target</th><th>Progress</th><th>Next step</th></tr>' + T.ladders.map(l =>
+    `<tr><td>${l.done ? '✅ ' : ''}${l.name}</td><td class="n">${l.best == null ? '–' : l.best + u(l)}</td><td class="n">${l.target == null ? '–' : l.target + u(l)}</td><td>${l.pct == null ? '' : `<div class="bar"><i style="width:${Math.round(l.pct * 100)}%"></i></div>`}</td><td class="tgt">${l.next || ''}</td></tr>`).join('');
+  new Chart(clift, { type: 'line', data: lineSeries(T.series, ['pullup_weighted', 'dip_weighted', 'hammer_curl'], ['Pull-up ×5', 'Dip ×6', 'Hammer curl']) });
+  new Chart(chold, { type: 'line', data: lineSeries(T.series, ['lsit_tuck', 'lsit', 'fl_tuck', 'front_lever', 'hs_free', 'planche_lean'], ['L-sit tuck', 'L-sit full', 'FL tuck', 'FL adv. tuck', 'Freestanding HS', 'Planche lean']) });
+}
+
+function renderFlags(d) {
+  const el = document.getElementById('flags');
+  if (!d.flags?.length) return;
+  el.hidden = false;
+  el.innerHTML = `<b class="no">⚠️ Pushing too hard</b><ul>${d.flags.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`;
+}
+
+function renderDiet(D, C) {
+  const T = D.today, wk = D.week, t = ymd(new Date());
+  const used = T.weekUsed ?? wk.filter(x => x.date < t).reduce((a, x) => a + (x.eaten ?? x.base), 0);
+  const budget = T.weekBudget ?? wk.reduce((a, x) => a + x.base, 0);
+  const feastDay = wk.find(x => x.cheat);
+  document.getElementById('dkpis').innerHTML = [
+    kpi('Today\'s target', fmt(T.kcal) + ' kcal', T.note ? esc(T.note) : `${T.protein} g protein`, null),
+    kpi('Week budget used', `${fmt(used)} / ${fmt(budget)}`, `before today · ${T.daysLeft} days left`, null),
+    kpi('High days', T.cycling ? `${T.highsUsed + (T.type === 'low' ? 0 : 1)}/${T.highsAllowed}` : '–', feastDay ? `feast ${wd(feastDay.date)} (cap 3,200)` : 'B/D days; tell the bot a feast ahead', null),
+    kpi('Est. maintenance', D.maintenance ? fmt(D.maintenance.kcal) : '–', D.maintenance ? `${D.maintenance.kgPerWeek > 0 ? '+' : ''}${D.maintenance.kgPerWeek} kg/wk · ${D.maintenance.loggedDays} days` : 'needs 10 logged days + 3 weigh-ins', null)
+  ].join('');
+  new Chart(cdw, { type: 'bar', data: { labels: wk.map(x => wd(x.date) + (x.cheat ? ' 🍖' : x.type === 'high' ? ' ▲' : '')), datasets: [
+    { label: 'Eaten', data: wk.map(x => x.eaten), backgroundColor: wk.map(x => x.cheat ? css('--b') : css('--a')) },
+    { type: 'line', label: 'Target (low / high / feast)', data: wk.map(x => x.target), borderColor: css('--good'), pointRadius: 3, stepped: 'middle' }
+  ] } });
+  const P = D.plan;
+  document.getElementById('dplan').innerHTML = P
+    ? `<div><b>${P.plan ? esc(P.plan) : fmt(P.kcal) + ' kcal/day'}</b> · ${P.protein_g} g protein <span class="tgt">(${esc(P.goal)}, ${P.from.slice(5)} → ${P.to.slice(5)})</span></div><p>${esc(P.summary)}</p><ul class="plan">${(P.recommendations || []).map(r => `<li>${esc(r)}</li>`).join('')}</ul>`
+    : '<div class="tgt">No review yet. It runs Sundays at 07:00 with the recap, or send /diet to the bot.</div>';
+}
+
+function renderRecovery(R) {
+  const S = R.summary, days = R.days, last = days.at(-1);
+  const pct = x => x == null ? '–' : Math.round(x * 100) + '%';
+  document.getElementById('rkpis').innerHTML = [
+    kpi('Sleep (7d avg)', S.sleepAvg7 != null ? S.sleepAvg7 + ' h' : '–', `${S.sleepNights} nights logged · aim 7.5+`, S.sleepAvg7 != null ? S.sleepAvg7 >= 7 : null),
+    kpi('Morning wood (7d)', pct(S.woodRate7), S.woodRatePrev != null ? `was ${pct(S.woodRatePrev)} before` : `${S.woodDays} days logged`, S.woodRate7 != null ? S.woodRate7 >= 0.5 : null),
+    kpi('HRV (3d avg)', S.hrv3 != null ? S.hrv3 + ' ms' : '–', S.hrvBase != null ? `normal ${S.hrvBase} ms` : 'normal needs ~7 readings', S.hrv3 != null && S.hrvBase != null ? S.hrv3 >= S.hrvBase * 0.85 : null),
+    kpi('Resting HR (3d)', S.rhr3 != null ? S.rhr3 + ' bpm' : '–', S.rhrBase != null ? `normal ${S.rhrBase} bpm` : 'add "rhr 55" from Elite HRV', S.rhr3 != null && S.rhrBase != null ? S.rhr3 < S.rhrBase + 5 : null),
+    kpi('Energy (7d)', S.energyAvg7 != null ? S.energyAvg7 + '/5' : '–', 'from the morning line', S.energyAvg7 != null ? S.energyAvg7 > 2.5 : null),
+    kpi('Knee max (7d)', S.kneeMax7 != null ? S.kneeMax7 + '/10' : '–', 'rule: ≤ 3', S.kneeMax7 != null ? S.kneeMax7 <= 3 : null)
+  ].join('');
+  const lab = days.map(x => x.date.slice(5));
+  new Chart(csl, { type: 'bar', data: { labels: lab, datasets: [
+    { label: 'Sleep', data: days.map(x => x.sleep_h ?? null), backgroundColor: days.map(x => (x.sleep_h ?? 9) < 6.5 ? css('--bad') : css('--a')) },
+    { type: 'line', label: '7.5 h', data: days.map(() => 7.5), borderColor: css('--good'), borderDash: [5, 5], pointRadius: 0 }
+  ] } });
+  new Chart(chrv, { type: 'line', data: { labels: lab, datasets: [
+    { label: 'HRV (ms)', data: days.map(x => x.hrv ?? null), borderColor: css('--a'), yAxisID: 'y', spanGaps: true, tension: .25 },
+    ...(S.hrvBase != null ? [{ label: 'HRV normal', data: days.map(() => S.hrvBase), borderColor: css('--a'), borderDash: [4, 4], pointRadius: 0, yAxisID: 'y' }] : []),
+    { label: 'Resting HR', data: days.map(x => x.rhr ?? null), borderColor: css('--b'), yAxisID: 'y1', spanGaps: true, tension: .25 }
+  ] }, options: { scales: { y1: { position: 'right', grid: { drawOnChartArea: false } } } } });
+  const d14 = days.slice(-14);
+  const cell = (v, good, txt) => `<span style="background:${v == null ? 'transparent' : good ? 'color-mix(in srgb, var(--good) 30%, transparent)' : 'color-mix(in srgb, var(--bad) 30%, transparent)'}">${v == null ? '·' : txt}</span>`;
+  document.getElementById('rstrip').innerHTML =
+    `<div class="strip">${d14.map(x => `<span class="tgt" style="border:0">${x.date.slice(8)}</span>`).join('')}</div>` +
+    `<div class="strip" style="margin-top:3px">${d14.map(x => cell(x.wood, x.wood, x.wood ? 'Y' : 'N')).join('')}</div>` +
+    `<div class="strip" style="margin-top:3px">${d14.map(x => cell(x.energy, x.energy >= 3, x.energy)).join('')}</div>` +
+    `<div class="strip" style="margin-top:3px">${d14.map(x => cell(x.knee, x.knee <= 3, x.knee)).join('')}</div>` +
+    (R.flags.length ? '' : '<div class="note">No recovery flags.</div>');
+}
+
+function render(d) {
+  renderFlags(d);
+  if (d.training) renderTraining(d.training);
+  if (d.diet) renderDiet(d.diet, d.config);
+  if (d.recovery) renderRecovery(d.recovery);
+  const C = d.config, M = d.measurements, E = d.events;
+  const lastW = [...M].reverse().find(m => m.weight), lastT = [...M].reverse().find(m => m.waist);
+  const ratio = lastT?.shoulders && lastT?.waist ? lastT.shoulders / lastT.waist : null;
+  document.getElementById('sub').textContent = `Updated ${new Date().toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })} · ${E.filter(e => e.type === 'food').length} food entries in view`;
+  document.getElementById('phase').innerHTML = `<b>${d.phase.name}</b> · ${fmt(d.phase.kcal)} kcal/day · ${C.proteinG} g protein · ${d.phase.note || ''}`;
+  const w = d.week;
+  document.getElementById('kpis').innerHTML = [
+    kpi('Weight', lastW ? lastW.weight + ' kg' : '–', `target ${C.targets.weight} kg · ${lastW?.date || ''}`, lastW ? lastW.weight <= C.targets.weight + 0.5 : null),
+    kpi('Waist', lastT ? lastT.waist + '"' : '–', `target ≤ ${C.targets.waist}"`, lastT ? lastT.waist <= C.targets.waist : null),
+    kpi('S ÷ W ratio', ratio ? ratio.toFixed(2) : '–', `target ${C.targets.ratio}`, ratio ? ratio >= C.targets.ratio : null),
+    kpi('Arms', lastT?.arms ? lastT.arms + '"' : '–', `floor ${C.floors.arms}"`, lastT?.arms ? lastT.arms >= C.floors.arms : null),
+    kpi('Avg kcal (7d)', fmt(w.avgKcal), `${w.loggedDays} days logged · base ${fmt(d.diet?.today?.base ?? d.phase.kcal)}`, w.avgKcal ? w.avgKcal <= (d.diet?.today?.base ?? d.phase.kcal) + 100 : null),
+    kpi('Avg protein (7d)', w.avgProtein ? w.avgProtein + ' g' : '–', `target ${C.proteinG} g`, w.avgProtein ? w.avgProtein >= C.proteinG - 10 : null),
+    kpi('Avg steps (7d)', fmt(w.avgSteps), `target ${fmt(C.stepsTarget)}`, w.avgSteps ? w.avgSteps >= C.stepsTarget * 0.95 : null)
+  ].join('');
+
+  // Body
+  const mw = M.filter(m => m.weight || m.waist);
+  new Chart(cw, { type: 'line', data: { labels: mw.map(m => m.date), datasets: [
+    { label: 'Weight', data: mw.map(m => m.weight), borderColor: css('--a'), yAxisID: 'y', spanGaps: true, tension: .25 },
+    { label: 'Weight, 7-day avg', data: mw.map(m => { const ws = M.filter(x => x.weight && x.date <= m.date && (new Date(m.date) - new Date(x.date)) / 864e5 < 7).map(x => x.weight); return ws.length ? +(ws.reduce((a, b) => a + b, 0) / ws.length).toFixed(1) : null; }), borderColor: css('--good'), yAxisID: 'y', spanGaps: true, tension: .3, pointRadius: 0 },
+    { label: 'Waist', data: mw.map(m => m.waist), borderColor: css('--b'), yAxisID: 'y1', spanGaps: true, tension: .25 }
+  ] }, options: { scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } } } });
+  const mr = M.filter(m => m.shoulders && m.waist);
+  new Chart(cr, { type: 'line', data: { labels: mr.map(m => m.date), datasets: [
+    { label: 'S÷W', data: mr.map(m => +(m.shoulders / m.waist).toFixed(3)), borderColor: css('--a'), yAxisID: 'y', tension: .25 },
+    { label: 'Target', data: mr.map(() => C.targets.ratio), borderColor: css('--good'), borderDash: [5, 5], pointRadius: 0, yAxisID: 'y' },
+    { label: 'Arms', data: mr.map(m => m.arms), borderColor: css('--b'), yAxisID: 'y1', tension: .25 }
+  ] }, options: { scales: { y1: { position: 'right', grid: { drawOnChartArea: false } } } } });
+
+  // Food
+  const days = [...Array(21)].map((_, i) => ymd(new Date(Date.now() - (20 - i) * 864e5)));
+  const food = E.filter(e => e.type === 'food');
+  const settings = Object.keys(COLORS);
+  new Chart(ck, { type: 'bar', data: { labels: days.map(x => x.slice(5)), datasets: [
+    ...settings.map(s => ({ label: s, stack: 'k', backgroundColor: COLORS[s],
+      data: days.map(dt => food.filter(f => f.date === dt && (f.setting || 'unknown') === s).reduce((a, f) => a + (f.total?.kcal || 0), 0)) })),
+    { type: 'line', label: 'Target', data: days.map(() => d.phase.kcal), borderColor: css('--good'), borderDash: [5, 5], pointRadius: 0 }
+  ] }, options: { scales: { x: { stacked: true }, y: { stacked: true } } } });
+  new Chart(cp, { type: 'bar', data: { labels: days.map(x => x.slice(5)), datasets: [
+    { label: 'Protein', backgroundColor: css('--a'), data: days.map(dt => food.filter(f => f.date === dt).reduce((a, f) => a + (f.total?.protein_g || 0), 0)) },
+    { type: 'line', label: 'Target', data: days.map(() => C.proteinG), borderColor: css('--good'), borderDash: [5, 5], pointRadius: 0 }
+  ] } });
+  const f14 = d.fortnight;
+  document.getElementById('top').innerHTML = '<tr><th>Item</th><th>Setting</th><th>Date</th><th class="n">kcal</th></tr>' +
+    (f14.topItems.map(i => `<tr><td>${i.name}</td><td>${i.setting || ''}</td><td>${i.date.slice(5)}</td><td class="n">${fmt(i.kcal)}</td></tr>`).join('') || '<tr><td colspan=4>No food logged yet</td></tr>');
+  const bs = f14.kcalBySetting;
+  new Chart(cs, { type: 'doughnut', data: { labels: Object.keys(bs), datasets: [{ data: Object.values(bs), backgroundColor: Object.keys(bs).map(k => COLORS[k] || '#888') }] } });
+
+  // Steps
+  const steps = {}; E.filter(e => e.type === 'steps').forEach(e => steps[e.date] = e.steps);
+  new Chart(cst, { type: 'bar', data: { labels: days.map(x => x.slice(5)), datasets: [
+    { label: 'Steps', backgroundColor: css('--a'), data: days.map(dt => steps[dt] || 0) },
+    { type: 'line', label: 'Target', data: days.map(() => C.stepsTarget), borderColor: css('--good'), borderDash: [5, 5], pointRadius: 0 }
+  ] } });
+  const sp = d.training ? d.training.setsPerMuscle : w.setsPerMuscle;
+  new Chart(cm, { type: 'bar', data: { labels: Object.keys(sp), datasets: [{ label: 'Sets', data: Object.values(sp), backgroundColor: css('--b') }] }, options: { indexAxis: 'y' } });
+}
+</script>
+</main></body></html>

@@ -1,0 +1,7 @@
+*.local
+.env
+.env*
+.keys.local
+.secrets.local
+.vercel
+node_modules
