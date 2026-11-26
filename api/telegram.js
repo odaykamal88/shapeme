@@ -24,7 +24,7 @@ import { today, currentPhase, CONFIG } from '../lib/config.js';
 import { dayFood, weekStats } from '../lib/summary.js';
 import { treadmillSteps, syncSteps } from '../lib/walk.js';
 import { planDiff } from '../lib/plandiff.js';
-import { commitDraft, commitButtons, commitText, weekStart, usualMeals, usualButtons, countdownLine, slipLine, milestoneGap, sameDayKcal } from '../lib/engage.js';
+import { commitDraft, commitButtons, commitText, weekStart, usualMeals, usualButtons, countdownLine, slipLine, sameDayKcal } from '../lib/engage.js';
 import { PARSER_CATALOG, sessionFor, homeFor, ALL_EXERCISES, LADDERS, GYM_ORDER, HOME_ORDER } from '../lib/plan.js';
 import { plannedSets, setsOf, planCard, lastPerformance, fmtSets, progressionHint, trackValue, trackKey, ladderProgress, adherence, setsPerMuscle } from '../lib/training.js';
 
@@ -203,29 +203,17 @@ async function logWorkout(chat, parsed, raw) {
 
   const ev = await recentEvents(2);
   const prs = [...valid, ...corrected].filter(x => { const k = trackKey(x), v = trackValue(x); return k && v != null && (bestBefore[k] == null || v > bestBefore[k]); });
-  const hints = [...valid, ...corrected].map(progressionHint).filter(Boolean).slice(0, 2);
   const total = ev.filter(e => e.type === 'workout' && e.date === date).reduce((n, e) => n + (e.exercises || []).length, 0);
   const when = date === t ? '' : date === today(new Date(Date.now() - 864e5)) ? ' (yesterday)' : ` (${date.slice(5)})`;
-  const lines = [`🏋️ <b>${session}${when} logged</b> · ${total} exercise${total === 1 ? '' : 's'} on the day`];
-  if (asPlanned.length) lines.push(`✅ As planned: ${asPlanned.length}`);
-  if (custom.length) lines.push(`📝 ${custom.map(x => `${esc(x.name)} ${compactSets(x)}`).join(' · ')}`);
-  if (corrected.length) lines.push(`✏️ Updated: ${corrected.map(x => `${esc(x.name)} → ${compactSets(x)}`).join(' · ')}`);
-  if (removed.length) lines.push(`⏭ Not done: ${removed.map(esc).join(', ')}`);
-  if (kept.length && !asPlanned.length && !custom.length && !corrected.length && !removed.length) lines.push(`Already logged: ${kept.length}, nothing added twice.`);
-  if (prs.length) lines.push(`🏆 PR: ${prs.map(x => esc(x.name)).join(', ')}`);
-  if (hints.length) lines.push(`➡️ ${hints.map(esc).join(' · ')}`);
-  if (missing.length) lines.push(`✍️ Numbers for: ${missing.map(x => esc(x.name)).join(', ')} (not in today's plan)`);
+  // One line, no reasoning on show: what was logged, plus only what changes his day (PR, new calorie target, steps, a missing number).
   const short = n => esc(String(n).replace(/^(Superset: |\+ )/, '').replace(/\s*\(.*\)$/, ''));
-  if (vsPlan?.swaps.length) lines.push(`🔀 ${vsPlan.swaps.map(([p, x]) => `${short(x)} for ${short(p)}`).join(' · ')}`);
-  if (vsPlan?.added.length) lines.push(`➕ Extra: ${vsPlan.added.map(short).join(', ')}`);
-  if (vsPlan?.missed.length) lines.push(`⏭ Not done from ${session}: ${vsPlan.missed.map(short).join(', ')}. The nightly review fits ${vsPlan.missed.length > 1 ? 'them' : 'it'} into the next sessions.`);
-  const gap = milestoneGap([...valid, ...corrected], bestBefore);
-  if (gap && !prs.length) lines.push(esc(gap));
-  if (adj && adj.kcal !== sameDay?.kcal) lines.push(`🍽 Today's target ${fmt(tt0.kcal)} → <b>${fmt(adj.kcal)}</b> kcal: ${esc(adj.why)}`);
-  if (walked) lines.push(`👟 Treadmill ≈ ${walked.extra.toLocaleString('en-US')} steps → ${walked.total.toLocaleString('en-US')} today`);
-  const flags = loadFlags(ev, [], { body: false });
-  if (flags.length) lines.push(`⚠️ ${esc(flags[0])}`);
-  lines.push(`<i>Anything off? Just say what changed, e.g. "dips were 3×8", "no negatives".</i>`);
+  const nothingNew = kept.length && !asPlanned.length && !custom.length && !corrected.length && !removed.length;
+  const bits = [nothingNew ? `🏋️ ${session}${when}: already logged` : `🏋️ <b>${session}${when} logged</b> · ${total} exercise${total === 1 ? '' : 's'}`,
+    prs.length ? `🏆 ${prs.map(x => short(x.name)).join(', ')}` : null,
+    adj && adj.kcal !== sameDay?.kcal ? `🍽 today ${fmt(adj.kcal)} kcal` : null,
+    walked ? `👟 +${walked.extra.toLocaleString('en-US')} steps` : null,
+    missing.length ? `sets for ${missing.map(x => short(x.name)).join(', ')}?` : null].filter(Boolean);
+  const lines = [bits.join(' · ')];
   await send(chat, lines.join('\n'), added ? { markup: buttons([[['↩️ Undo', `x:${added.pathname}`]]]) } : {});
   pinUpdate(chat);
   // Off-plan sessions are folded into the nightly review (silent), not re-planned on the spot.
