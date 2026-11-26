@@ -76,6 +76,10 @@ function trainingLine(events) {
 
 const hhmm = ts => new Date(ts).toLocaleTimeString('en-GB', { timeZone: CONFIG.tz, hour: '2-digit', minute: '2-digit' });
 const todaysFood = ev => ev.filter(e => e.type === 'food' && e.date === today()).sort((a, b) => a.ts - b.ts);
+// Yesterday's entries are shown to the parser as 101, 102… so late corrections ("the yogurt last night was…") find them.
+const yday = () => today(new Date(Date.now() - 864e5));
+const yesterdaysFood = ev => ev.filter(e => e.type === 'food' && e.date === yday()).sort((a, b) => a.ts - b.ts);
+const foodByNumber = (ev, n) => n > 100 ? yesterdaysFood(ev)[n - 101] : todaysFood(ev)[n - 1];
 const foodLine = (e, i) => `${i + 1}. ${hhmm(e.ts)} · ${e.meal}${e.cheat ? ' (feast)' : ''} · ${fmt(e.total?.kcal || 0)} kcal · ${(e.items || []).map(x => `${x.name} (${x.portion}) ${x.kcal}`).join('; ')}`;
 const MEAL_KEYS = ['meal', 'setting', 'items', 'total', 'hidden_calories', 'confidence', 'missing_info', 'cheat'];
 const mealOnly = f => Object.fromEntries(MEAL_KEYS.filter(k => f[k] !== undefined).map(k => [k, f[k]]));
@@ -229,19 +233,21 @@ async function logWorkout(chat, parsed, raw) {
 
 // Reads a text message with today's context (food logged, today's session and place). Exported for /api/admin?parse=.
 export async function parseText(text, replyText = null) {
-  const evNow = await recentEvents(1), foodNow = todaysFood(evNow);
+  const evNow = await recentEvents(1), foodNow = todaysFood(evNow), foodY = yesterdaysFood(evNow);
+  const fixing = await readDoc('fixing'), fixEntry = fixing && Date.now() - fixing.at < 15 * 60e3 ? [...foodNow, ...foodY].find(e => String(e.ts) === String(fixing.ts)) : null;
+  const fixNo = fixEntry ? (fixEntry.date === today() ? foodNow.indexOf(fixEntry) + 1 : foodY.indexOf(fixEntry) + 101) : null;
   const todaySession = sessionFor(today(), evNow);
   const placeNow = evNow.filter(e => e.type === 'week_plan' && e.where && e.days?.some(d => d.date === today())).sort((a, b) => b.ts - a.ts)[0] || null;
   const lp = await readDoc('last_prompt'), lpMin = lp ? Math.round((Date.now() - lp.ts) / 60000) : null;
   const routineDone = evNow.some(e => e.type === 'routine' && e.date === today());
   const reply = await ask({
-    system: textSystem({ catalog: PARSER_CATALOG, todaySession: `${todaySession.key} (${todaySession.name})`, todayFood: foodNow.map(foodLine).join('\n'),
+    system: textSystem({ catalog: PARSER_CATALOG, todaySession: `${todaySession.key} (${todaySession.name})`, todayFood: `${foodNow.map(foodLine).join('\n') || '(nothing yet today)'}\nYesterday (${yday()}), numbered from 101 (replacing one keeps its date):\n${foodY.map((e, i) => foodLine(e, i + 100)).join('\n') || '(nothing)'}${fixNo ? `\nHE TAPPED FIX ON #${fixNo}: his message corrects that entry -> food, action "replace", replaces ${fixNo}, the FULL corrected meal (keep every item he didn't change).` : ''}`,
       todayState: `${placeNow ? `today's gym session ${placeNow.key || ''} is already rebuilt as "${placeNow.days[0].name}" for ${placeNow.where}` : `today's gym session is ${todaySession.name} at the gym`}\nTODAY'S PLAN: ${[...dayPlan(evNow, today()).exercises, ...(homeFor(today(), evNow).dayType ? homeFor(today(), evNow).exercises : [])].map(e => `${e.id || e.plan_id || 'custom'}: ${e.name} ${e.target}`).join('; ')}\nLAST THING YOU ASKED HIM: ${lp && lpMin < 240 ? `${lp.kind} (${lpMin} min ago)` : 'nothing recent'}; morning routine ${routineDone ? 'already logged' : 'not logged yet'}.\nAlready logged today: ${evNow.filter(e => e.type === 'workout' && e.date === today()).map(e => `${e.session}: ${(e.exercises || []).map(x => x.name).join(', ')}`).join(' | ') || 'nothing'}` }),
     content: `Today is ${today()}, time ${hhmm(Date.now())}.${replyText ? `\nHe is replying to your message: "${replyText.slice(0, 600)}"` : ''}\nMessage: ${text}`,
     maxTokens: 8000, schema: TEXT
   });
   const entries = reply.entries || (reply.entry ? [reply.entry] : [reply]);
-  return { entries: entries.length ? entries : [{ kind: 'note', text }], foodNow, placeNow };
+  return { entries: entries.length ? entries : [{ kind: 'note', text }], foodNow, placeNow, evNow, fixEntry };
 }
 
 async function showPlan(chat, what = 'all', { session = null, training = false } = {}) {
@@ -450,7 +456,7 @@ async function handle(msg, opts = {}) {
 
   if (!text) return send(chat, 'Send a photo or text.');
 
-  const { entries, foodNow, placeNow } = await parseText(text, msg.reply_to_message?.text);
+  const { entries, foodNow, placeNow, evNow: evParsed, fixEntry } = await parseText(text, msg.reply_to_message?.text);
   if (CORRECTION.test(text.trim())) await misread('correction', text);
   waitUntil(addEvent('inbound', { text: text.slice(0, 500), kinds: entries.map(e => e.kind), kind: entries[0]?.kind }).catch(() => {}));
   for (const parsed of entries) await dispatch(parsed);
@@ -458,7 +464,9 @@ async function handle(msg, opts = {}) {
   async function dispatch(parsed) {
   switch (parsed.kind) {
     case 'food': {
-      const old = parsed.action === 'replace' && parsed.replaces ? foodNow[parsed.replaces - 1] : null;
+      // A reply after tapping Fix always corrects that entry, never adds a new one.
+      const old = (parsed.action === 'replace' && parsed.replaces ? foodByNumber(evParsed, parsed.replaces) : null) || fixEntry;
+      if (fixEntry) await writeDoc('fixing', null);
       if (old) return replaceFood(chat, old, parsed, text, msg.message_id);
       return logFood(chat, parsed, { caption: text, from: 'text', msg_id: msg.message_id, date: parsed.date });
     }
@@ -664,6 +672,7 @@ async function handleCallback(cq) {
     if (a === 'ok') { await answer(cq.id, '👌'); return editButtons(chat, mid, null); }
     if (a === 'fix') {
       await answer(cq.id); await misread('food_fix', (entry?.items || []).map(i => i.name).join(', '));
+      if (entry) await writeDoc('fixing', { ts: entry.ts, at: Date.now() });
       return sendRaw(chat, `✏️ What's off with <b>${esc((entry?.items || []).map(i => i.name).slice(0, 3).join(', ') || 'that meal')}</b> (~${fmt(entry?.total?.kcal || 0)} kcal)? Say it or type it.`,
         { markup: { force_reply: true, input_field_placeholder: 'half the rice, no oil…' } });
     }
