@@ -15,5 +15,6 @@
   { "text": "how am I doing on protein this week?", "expect": [{ "kind": "query" }] },
   { "text": "77.6 slept 7h20 hrv 58", "expect": [{ "kind": "recovery" }] },
   { "text": "dips were 3x8, no negatives", "expect": [{ "kind": "workout", "exercises~": "dip" }] },
-  { "text": "show me today's workout", "expect": [{ "kind": "show_plan" }] }
+  { "text": "show me today's workout", "expect": [{ "kind": "show_plan" }] },
+  { "text": "Heads up, I'm on a wedding weekend until Sunday so expect big meals and drinks and probably no gym, adjust expectations", "expect": [{ "kind": "event", "training": "none" }] }
 ]

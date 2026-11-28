@@ -24,7 +24,7 @@ import { today, currentPhase, CONFIG } from '../lib/config.js';
 import { dayFood, weekStats } from '../lib/summary.js';
 import { treadmillSteps, syncSteps } from '../lib/walk.js';
 import { planDiff } from '../lib/plandiff.js';
-import { commitDraft, commitButtons, commitText, weekStart, usualMeals, usualButtons, countdownLine, slipLine, sameDayKcal } from '../lib/engage.js';
+import { commitDraft, commitButtons, commitText, weekStart, usualMeals, usualButtons, countdownLine, slipLine, eventLine, sameDayKcal } from '../lib/engage.js';
 import { PARSER_CATALOG, sessionFor, homeFor, ALL_EXERCISES, LADDERS, GYM_ORDER, HOME_ORDER } from '../lib/plan.js';
 import { plannedSets, setsOf, planCard, lastPerformance, fmtSets, progressionHint, trackValue, trackKey, ladderProgress, adherence, setsPerMuscle } from '../lib/training.js';
 
@@ -270,7 +270,7 @@ async function afterCheckin(chat) {
   if (await markSeen(`today_card_${today()}`)) {
     const profile = await getProfile(), focus = ev.filter(e => e.type === 'coach_log').pop()?.focus || null;
     await asked(ev.some(e => e.type === 'routine' && e.date === today()) ? 'today' : 'routine');
-    await send(chat, todayText(ev, { tt: todayTarget(ev), focus, gymHour: usualHour(ev, GYM_ORDER, profile) ?? DEFAULT_HOUR.gym, homeHour: usualHour(ev, HOME_ORDER, profile) ?? DEFAULT_HOUR.home, extra: [slipLine(ev), countdownLine(ev)].filter(Boolean).join('\n') || null }), { markup: usualButtons(usualMeals(ev)) });
+    await send(chat, todayText(ev, { tt: todayTarget(ev), focus, gymHour: usualHour(ev, GYM_ORDER, profile) ?? DEFAULT_HOUR.gym, homeHour: usualHour(ev, HOME_ORDER, profile) ?? DEFAULT_HOUR.home, extra: [eventLine(ev) || slipLine(ev), eventLine(ev) ? null : countdownLine(ev)].filter(Boolean).join('\n') || null }), { markup: usualButtons(usualMeals(ev)) });
   }
   await celebrate(chat, ev);
 }
@@ -536,6 +536,14 @@ async function handle(msg, opts = {}) {
       const ev = await recentEvents(1), tt = todayTarget(ev, parsed.date);
       const d = new Date(`${parsed.date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
       return send(chat, `🍖 <b>Feast booked for ${d}</b>: cap ${fmt(tt.feastCap || 3200)} kcal, and it takes one of the week's high days, so the others run low.\n\n<i>On the night: meat first, then bread or dessert, not both. Spirits with soda or dry wine over beer.</i>`);
+    }
+    case 'event': {
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(parsed.from || '') ? parsed.from : today(), to = /^\d{4}-\d{2}-\d{2}$/.test(parsed.to || '') && parsed.to >= from ? parsed.to : from;
+      await addEvent('event_mode', { label: parsed.label || 'Event', from, to, training: parsed.training || 'none' });
+      pinUpdate(chat);
+      if (to < today()) return send(chat, `👍 ${esc(parsed.label || 'Event')} wrapped. Back to the plan; next session is where you left off.`);
+      const day = d => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+      return send(chat, `🎉 <b>${esc(parsed.label || 'Event')}</b> ${from === to ? day(from) : `${day(from)}–${day(to)}`}: enjoy it. No ${parsed.training === 'none' ? 'workout ' : ''}nudges, feast-level targets, nothing counts as a miss. Minimums: protein at one meal, water between drinks, a walk. We pick up after.`);
     }
     case 'remember':
       await remember(parsed.fact);

@@ -41,6 +41,8 @@ export default async function handler(req, res) {
   const { retryQueue } = await import('./telegram.js');
   const retried = await retryQueue(owner).catch(() => 0);
   if (retried) out.push(`retried ${retried}`);
+  const { eventOn } = await import('../lib/plan.js');
+  if (eventOn(ev, t)) return res.send(`event mode (${eventOn(ev, t).label}): no nudges${out.length ? `; ${out.join(', ')}` : ''}`);
   const hs = habitState(ev);
   if ((h === 10 || h === 11) && nudgeDue(hs, 'checkin') && await markSeen(`habit_checkin_${t}`)) { await send(owner, NUDGES.checkin(hs), { silent: true, markup: checkinButtons({}) }); out.push('checkin nudge'); }
   if ((h === 14 || h === 15) && nudgeDue(hs, 'food') && await markSeen(`habit_food_${t}`)) { await send(owner, NUDGES.food(hs), { silent: true }); out.push('food nudge'); }
