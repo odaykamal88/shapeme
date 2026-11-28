@@ -29,7 +29,8 @@ export default async function handler(req, res) {
   const gym = dayPlan(ev, t), home = homeFor(t, ev);
   const did = order => all.some(e => (e.type === 'workout' || e.type === 'workout_skip') && order.includes(e.session));
   const steps = all.filter(e => e.type === 'steps').map(e => e.steps).pop();
-  const recap = await eveningRecap(ev, { habit }).catch(e => { console.error('recap', e); return ''; });
+  const { overBudget } = await import('../lib/claude.js');
+  const recap = (await overBudget()) ? '' : await eveningRecap(ev, { habit }).catch(e => { console.error('recap', e); return ''; });
   const head = `🌙 <b>Today</b>${habit.onboarding ? ` · day ${habit.day} of 20` : ''} · ${f.kcal.toLocaleString('en-US')}/${tt.kcal.toLocaleString('en-US')} kcal · ${f.protein}/${tt.protein} g${steps != null ? ` · ${Math.round(steps / 100) / 10}k steps` : ''}`;
   const asks = [];
   if (steps == null) asks.push(`👟 Steps today? e.g. <i>12400 steps</i>`);

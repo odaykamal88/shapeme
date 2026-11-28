@@ -232,7 +232,7 @@ export async function parseText(text, replyText = null) {
     system: textSystem({ catalog: PARSER_CATALOG, todaySession: `${todaySession.key} (${todaySession.name})`, todayFood: `${foodNow.map(foodLine).join('\n') || '(nothing yet today)'}\nYesterday (${yday()}), numbered from 101 (replacing one keeps its date):\n${foodY.map((e, i) => foodLine(e, i + 100)).join('\n') || '(nothing)'}${fixNo ? `\nHE TAPPED FIX ON #${fixNo}: his message corrects that entry -> food, action "replace", replaces ${fixNo}, the FULL corrected meal (keep every item he didn't change).` : ''}`,
       todayState: `${placeNow ? `today's gym session ${placeNow.key || ''} is already rebuilt as "${placeNow.days[0].name}" for ${placeNow.where}` : `today's gym session is ${todaySession.name} at the gym`}\nTODAY'S PLAN: ${[...dayPlan(evNow, today()).exercises, ...(homeFor(today(), evNow).dayType ? homeFor(today(), evNow).exercises : [])].map(e => `${e.id || e.plan_id || 'custom'}: ${e.name} ${e.target}`).join('; ')}\nLAST THING YOU ASKED HIM: ${lp && lpMin < 240 ? `${lp.kind} (${lpMin} min ago)` : 'nothing recent'}; morning routine ${routineDone ? 'already logged' : 'not logged yet'}.\nAlready logged today: ${evNow.filter(e => e.type === 'workout' && e.date === today()).map(e => `${e.session}: ${(e.exercises || []).map(x => x.name).join(', ')}`).join(' | ') || 'nothing'}` }),
     content: `Today is ${today()}, time ${hhmm(Date.now())}.${replyText ? `\nHe is replying to your message: "${replyText.slice(0, 600)}"` : ''}\nMessage: ${text}`,
-    maxTokens: 8000, schema: TEXT
+    maxTokens: 8000, schema: TEXT, effort: 'low', tag: 'parse'
   });
   const entries = reply.entries || (reply.entry ? [reply.entry] : [reply]);
   return { entries: entries.length ? entries : [{ kind: 'note', text }], foodNow, placeNow, evNow, fixEntry };
@@ -417,7 +417,7 @@ async function handle(msg, opts = {}) {
       const fixed = await ask({
         system: FOOD_SYSTEM, cache: true,
         content: `Previous estimate: ${JSON.stringify(mealOnly(old))}\nHe edited his message to: ${text}\nReturn the full corrected entry.`,
-        maxTokens: 8000, schema: FOOD
+        maxTokens: 8000, schema: FOOD, effort: 'medium', tag: 'food'
       });
       return replaceFood(chat, old, fixed, `edited: ${text}`, msg.message_id);
     }
@@ -435,7 +435,7 @@ async function handle(msg, opts = {}) {
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } },
         { type: 'text', text: `Time in Cairo: ${new Date().toLocaleTimeString('en-GB', { timeZone: CONFIG.tz })}. Caption: ${text || '(none)'}` }
       ],
-      maxTokens: 8000, schema: FOOD
+      maxTokens: 8000, schema: FOOD, effort: 'medium', tag: 'food'
     });
     if (out.image_kind === 'body') return saveProgress(chat, buf, text, msg.media_group_id || null);
     if (out.image_kind === 'other') return send(chat, "🤔 That doesn't look like food, so I didn't log anything.");
@@ -524,7 +524,7 @@ async function handle(msg, opts = {}) {
         system: `${personaPrompt(profile, ev)}
 Answer his message using the data given. When giving food advice, separate his daily staples (small upgrades compound) from occasional meals (situational strategy). Only describe logged entries from the list given; never guess what an entry is. Lead with the answer. 40–90 words by default, one idea per short paragraph; go longer only if he asks for detail. For a day's food plan: the target and why in one line, then at most 4 short meal anchors; if you build them from his usual foods, say so ("from what you usually eat") so nothing looks like an old entry. If it's a follow-up, use the recent conversation.`,
         content: `${history ? `Recent conversation:\n${history}\n\n` : ''}Today's logged food, exactly as stored:\n${todaysFood(ev).map(foodLine).join('\n') || 'nothing logged yet'}\n\nEating patterns, 14 days (staples vs occasional): ${JSON.stringify((() => { const h = foodHabits(ev, 14); return { loggedDays: h.loggedDays, staples: h.staples.map(({ tokens, ...r }) => r), occasional: h.occasional.map(({ tokens, ...r }) => r), note: h.note }; })())}\n\nToday so far: ${JSON.stringify((() => { const f = dayFood(ev, today()), tt = todayTarget(ev); return { eaten: f.kcal, protein: f.protein, meals: f.meals, target: tt.kcal, proteinTarget: tt.protein, timeCairo: new Date().toLocaleTimeString('en-GB', { timeZone: CONFIG.tz, hour: '2-digit', minute: '2-digit' }), trainingToday: trainingLine(ev) }; })())}\n\nBody and food (14 days):\n${JSON.stringify(stats)}\n\nTraining:\n${JSON.stringify(training)}\n\nHis message: ${text}`,
-        maxTokens: 4000, effort: 'medium'
+        maxTokens: 4000, effort: 'medium', tag: 'chat'
       });
       await addEvent('chat', { q: text.slice(0, 500), a: answer.slice(0, 1500) });
       return send(chat, answer);

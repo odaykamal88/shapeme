@@ -21,6 +21,14 @@ export default async function handler(req, res) {
       }
     } catch (e) { console.error('legacy import not possible yet:', String(e.message || e).slice(0, 120)); }
   }
+  // Spend guard: the review runs only when something new was logged since the last one, and within the day's budget.
+  if (req.query.dry !== '1') {
+    const { recentEvents } = await import('../lib/store.js'), { overBudget } = await import('../lib/claude.js');
+    const ev = await recentEvents(), last = ev.filter(e => e.type === 'coach_log').pop()?.ts || 0;
+    const fresh = ev.some(e => e.ts > last && ['food', 'workout', 'workout_skip', 'recovery', 'steps', 'routine', 'photo'].includes(e.type));
+    if (!fresh) return res.json({ skipped: 'nothing new since the last review', imported });
+    if (await overBudget()) return res.json({ skipped: 'daily AI budget reached', imported });
+  }
   const out = await nightlyImprove({ dry: req.query.dry === '1' });
   res.json(req.query.dry === '1' ? out : { applied: out.applied, focus: out.focus, imported });
 }

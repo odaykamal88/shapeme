@@ -49,6 +49,13 @@ export default async function handler(req, res) {
     return res.json((j.data || []).map(m => m.id).filter(id => /tts|speech|playai|orpheus|voice/i.test(id)));
   }
   if (req.query.rollup) return res.json(await rollupMonths(Number(req.query.keep) || 21)); // also runs every Sunday
+  if (req.query.spend) { // estimated API spend per day and per feature, last N days
+    const { debugLog } = await import('../lib/store.js');
+    const rows = (await debugLog(Number(req.query.spend) || 7)).filter(e => e.type === 'api_usage'), by = {};
+    for (const e of rows) { const d = by[e.date] ||= { usd: 0, calls: 0, tags: {} }; d.usd += e.usd || 0; d.calls++; const t = d.tags[e.tag] ||= { usd: 0, calls: 0 }; t.usd += e.usd || 0; t.calls++; }
+    for (const d of Object.values(by)) { d.usd = +d.usd.toFixed(4); for (const t of Object.values(d.tags)) t.usd = +t.usd.toFixed(4); }
+    return res.json(by);
+  }
   if (req.query.log || req.query.misreads) { // conversation log (in/out) or just the misread signals with context, last N days
     const { debugLog } = await import('../lib/store.js');
     const ev = await debugLog(Number(req.query.log || req.query.misreads) || 7);
