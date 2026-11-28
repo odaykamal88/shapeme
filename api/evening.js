@@ -32,6 +32,8 @@ export default async function handler(req, res) {
   const { overBudget } = await import('../lib/claude.js');
   const recap = (await overBudget()) ? '' : await eveningRecap(ev, { habit }).catch(e => { console.error('recap', e); return ''; });
   const head = `🌙 <b>Today</b>${habit.onboarding ? ` · day ${habit.day} of 20` : ''} · ${f.kcal.toLocaleString('en-US')}/${tt.kcal.toLocaleString('en-US')} kcal · ${f.protein}/${tt.protein} g${steps != null ? ` · ${Math.round(steps / 100) / 10}k steps` : ''}`;
+  const { balanceLine, getBody } = await import('../lib/energy.js');
+  const bal = balanceLine(ev, t, await getBody());
   const asks = [];
   if (steps == null) asks.push(`👟 Steps today? e.g. <i>12400 steps</i>`);
   const gymMissing = gym.dayType === true && !did(GYM_ORDER), homeMissing = home.dayType === true && !did(HOME_ORDER);
@@ -45,7 +47,7 @@ export default async function handler(req, res) {
     if (dp) weekly.push(fold('🍽 <b>Next week\'s food</b>', dietMessage(dp).replace(/^🍽 <b>Diet for the week<\/b>[^\n]*\n\n/, '')));
     if (ht) weekly.push(fold('🔁 <b>Eating patterns</b>', `${ht.summary}\n${(ht.staples || []).map(s => `• ${s.item}: ${s.tip}`).join('\n')}`));
   }
-  const msg = `${head}\n\n${recap}${weekly.length ? `\n\n${weekly.join('\n')}` : ''}${asks.length ? `\n\n${asks.join('\n')}` : ''}`;
+  const msg = `${head}${bal ? `\n${bal}` : ''}\n\n${recap}${weekly.length ? `\n\n${weekly.join('\n')}` : ''}${asks.length ? `\n\n${asks.join('\n')}` : ''}`;
   if (req.query.dry) return res.send(msg);
   await writeDoc('last_prompt', { kind: 'evening', ts: Date.now() });
   await send(owner, msg, { markup: gymMissing ? workoutButtons(gym.key, false) : homeMissing ? workoutButtons(home.key, false) : undefined });

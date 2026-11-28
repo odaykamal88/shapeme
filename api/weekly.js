@@ -36,6 +36,7 @@ export default async function handler(req, res) {
   };
   const profile = await getProfile();
   const dietP = dietReview(ev, allMeas(meas), profile); // runs alongside the recap
+  await (await import('../lib/energy.js')).calibrate(ev, allMeas(meas)).catch(e => console.error('calibrate', e)); // burn formula vs his real maintenance
   const text = await ask({
     system: `${personaPrompt(profile, ev)}
 Write his Sunday recap, under 180 words, honest but in your voice (one light line of humour is welcome).
