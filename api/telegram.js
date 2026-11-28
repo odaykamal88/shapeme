@@ -16,8 +16,8 @@ import { allMeas } from '../lib/summary.js';
 import { todayTarget, targetNote, dietReview, dietMessage } from '../lib/diet.js';
 import { recoveryFlags, dayRecovery } from '../lib/recovery.js';
 import { getProfile, remember, personaPrompt, recentChat } from '../lib/persona.js';
-import { ask, FOOD_SYSTEM, textSystem } from '../lib/claude.js';
-import { FOOD, TEXT } from '../lib/schemas.js';
+import { ask, FOOD_SYSTEM, textSystem, STATS_SYSTEM } from '../lib/claude.js';
+import { FOOD, TEXT, STATS } from '../lib/schemas.js';
 import { verdict } from '../lib/coach.js';
 import { debugLog, addEvent, addMeasurement, recentEvents, allMeasurements, deleteLast, deleteByPath, markSeen, readDoc, writeDoc, savePhoto, listPhotos, deletePhotos, getOwner, setOwner } from '../lib/store.js';
 import { today, currentPhase, CONFIG } from '../lib/config.js';
@@ -290,6 +290,24 @@ async function celebrate(chat, ev = null) {
   if (c && await markSeen(`${c.key}_${today()}`)) await send(chat, c.text);
 }
 
+// Fitness screenshot → measured numbers (calories burned, steps, weight, body fat, BMR). One line back.
+async function logStats(chat, img, caption) {
+  const s = await ask({ system: STATS_SYSTEM, cache: true, content: [
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } },
+    { type: 'text', text: `Today is ${today()} (Cairo). Caption: ${caption || '(none)'}` }], maxTokens: 2000, schema: STATS, effort: 'low', tag: 'stats' });
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s.date || '') && s.date <= today() ? s.date : today();
+  const { date: _d, summary, ...nums } = s;
+  await addEvent('energy_reading', { ...nums, summary }, d);
+  const bits = [];
+  if (s.total_kcal) bits.push(`🔥 ${fmt(s.total_kcal)} kcal burned`); else if (s.active_kcal) bits.push(`🔥 ${fmt(s.active_kcal)} active kcal${s.workout_minutes ? ` (${s.workout_minutes} min)` : ''}`);
+  if (s.steps) { await syncSteps(d, { base: s.steps, includesTreadmill: /watch|garmin|fitbit|whoop|oura|band/i.test(s.source || '') }); bits.push(`👟 ${fmt(s.steps)} steps`); }
+  if (s.weight_kg) { await addMeasurement({ date: d, weight: s.weight_kg, ...(s.body_fat_pct ? { body_fat: s.body_fat_pct } : {}) }); await saveWeight(s.weight_kg); bits.push(`⚖️ ${s.weight_kg} kg${s.body_fat_pct ? ` · ${s.body_fat_pct}% fat` : ''}`); }
+  if (s.bmr_kcal) { await writeDoc('body', { ...((await readDoc('body')) || {}), bmr: s.bmr_kcal }); bits.push(`BMR ${fmt(s.bmr_kcal)}`); }
+  pinUpdate(chat);
+  const when = d === today() ? 'today' : d === yday() ? 'yesterday' : d.slice(5);
+  return send(chat, bits.length ? `⌚ ${bits.join(' · ')} (${when}). Measured numbers now replace my estimate.` : `⌚ Couldn't read clear numbers from that (${esc(summary || 'screenshot')}). A closer screenshot of the totals works best.`);
+}
+
 async function logRecovery(chat, r, raw, userMsgId = null) {
   const { kind, weight, ...fields } = r;
   if (weight) { await addMeasurement({ date: today(), weight }); await saveWeight(weight); }
@@ -373,7 +391,7 @@ async function handle(msg, opts = {}) {
     await send(chat, `🎙 <i>${esc(text)}</i>`);
   }
 
-  if (!/[\p{L}\p{N}]/u.test(text) && !msg.photo) return; // a stray "." or emoji-only message: nothing to log, no AI call
+  if (!/[\p{L}\p{N}]/u.test(text) && !msg.photo && !msg.document && !msg.video && !msg.video_note && !msg.animation) return; // a stray "." or emoji-only message: nothing to log, no AI call
   if (BOTTOM_KEYS[text]) text = BOTTOM_KEYS[text];
   if (text === '/help' || text === '/start') return send(chat, HELP);
   if (text === '/report') return dispatch({ kind: 'report', what: 'pdf' });
@@ -450,6 +468,8 @@ async function handle(msg, opts = {}) {
     return send(chat, "✏️ I saw the edit, but edits only update food entries. For anything else, send the correction as a new message.");
   }
 
+  if (msg.video || msg.video_note || msg.animation) return send(chat, "🎬 I can't read video. Send a screenshot of the screen (watch, app, machine or scale) and I'll pull the numbers.");
+  if (msg.document && /^image\//.test(msg.document.mime_type || '')) msg = { ...msg, photo: [{ file_id: msg.document.file_id }] }; // screenshots sent as files
   if (msg.photo) {
     const buf = await fileBuffer(msg.photo[msg.photo.length - 1].file_id);
     // Captioned progress photos skip the food model entirely.
@@ -464,7 +484,8 @@ async function handle(msg, opts = {}) {
       maxTokens: 8000, schema: FOOD, effort: 'medium', tag: 'food'
     });
     if (out.image_kind === 'body') return saveProgress(chat, buf, text, msg.media_group_id || null);
-    if (out.image_kind === 'other') return send(chat, "🤔 That doesn't look like food, so I didn't log anything.");
+    if (out.image_kind === 'stats') return logStats(chat, img, text);
+    if (out.image_kind === 'other') return send(chat, "🤔 That doesn't look like food or fitness numbers, so I didn't log anything.");
     return logFood(chat, out, { caption: text || null, from: 'photo', msg_id: msg.message_id });
   }
 
