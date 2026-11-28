@@ -13,7 +13,7 @@ import { dayPlan, adaptWeek, adaptMessage } from '../lib/adapt.js';
 import { sessionCard, morningCard, otherCard, todayText, esc, foldLong, workoutButtons, checkinButtons, pickerButtons } from '../lib/templates.js';
 import { loadFlags } from '../lib/load.js';
 import { allMeas } from '../lib/summary.js';
-import { todayTarget, targetNote, dietReview, dietMessage } from '../lib/diet.js';
+import { todayTarget, targetNote, dietReview, dietMessage, burnEstimate } from '../lib/diet.js';
 import { recoveryFlags, dayRecovery } from '../lib/recovery.js';
 import { getProfile, remember, personaPrompt, recentChat } from '../lib/persona.js';
 import { ask, FOOD_SYSTEM, textSystem } from '../lib/claude.js';
@@ -80,11 +80,12 @@ const todaysFood = ev => ev.filter(e => e.type === 'food' && e.date === today())
 const yday = () => today(new Date(Date.now() - 864e5));
 const yesterdaysFood = ev => ev.filter(e => e.type === 'food' && e.date === yday()).sort((a, b) => a.ts - b.ts);
 // What's stored per day (food, steps, training, check-ins, events), for the coach's "did you get it?" answers.
-const recentLogs = (ev, days = 3) => Array.from({ length: days }, (_, i) => today(new Date(Date.now() - i * 864e5))).map(d => {
+const recentLogs = (ev, days = 3, weightKg = 78) => Array.from({ length: days }, (_, i) => today(new Date(Date.now() - i * 864e5))).map(d => {
   const f = dayFood(ev, d), on = t => ev.filter(e => e.type === t && e.date === d);
   return { date: d, food: f.meals ? `${f.meals} meal(s), ${f.kcal} kcal` : 'none', steps: on('steps').map(e => e.steps).pop() ?? 'none',
     training: on('workout').map(e => e.session).join(', ') || (on('workout_skip').length ? 'skipped' : 'none'), checkin: on('recovery').length ? 'yes' : 'no',
-    event: ev.filter(e => e.type === 'event_mode' && d >= e.from && d <= e.to).pop()?.label || null };
+    event: ev.filter(e => e.type === 'event_mode' && d >= e.from && d <= e.to).pop()?.label || null,
+    burned_estimate: burnEstimate(ev, d, weightKg) };
 });
 const foodByNumber = (ev, n) => n > 100 ? yesterdaysFood(ev)[n - 101] : todaysFood(ev)[n - 1];
 const foodLine = (e, i) => `${i + 1}. ${hhmm(e.ts)} · ${e.meal}${e.cheat ? ' (feast)' : ''} · ${fmt(e.total?.kcal || 0)} kcal · ${(e.items || []).map(x => `${x.name} (${x.portion}) ${x.kcal}`).join('; ')}`;
@@ -371,6 +372,7 @@ async function handle(msg, opts = {}) {
     await send(chat, `🎙 <i>${esc(text)}</i>`);
   }
 
+  if (!/[\p{L}\p{N}]/u.test(text) && !msg.photo) return; // a stray "." or emoji-only message: nothing to log, no AI call
   if (BOTTOM_KEYS[text]) text = BOTTOM_KEYS[text];
   if (text === '/help' || text === '/start') return send(chat, HELP);
   if (text === '/report') return dispatch({ kind: 'report', what: 'pdf' });
@@ -566,7 +568,7 @@ async function handle(msg, opts = {}) {
       const answer = await ask({
         system: `${personaPrompt(profile, ev)}
 Answer his message using the data given. When giving food advice, separate his daily staples (small upgrades compound) from occasional meals (situational strategy). Only describe logged entries from the list given; never guess what an entry is. Lead with the answer. 40–90 words by default, one idea per short paragraph; go longer only if he asks for detail. For a day's food plan: the target and why in one line, then at most 4 short meal anchors; if you build them from his usual foods, say so ("from what you usually eat") so nothing looks like an old entry. If it's a follow-up, use the recent conversation.`,
-        content: `${history ? `Recent conversation:\n${history}\n\n` : ''}Today's logged food, exactly as stored:\n${todaysFood(ev).map(foodLine).join('\n') || 'nothing logged yet'}\n\nEverything logged, last 3 days (answer "did you get X" from this, not from food alone): ${JSON.stringify(recentLogs(ev))}\n\nEating patterns, 14 days (staples vs occasional): ${JSON.stringify((() => { const h = foodHabits(ev, 14); return { loggedDays: h.loggedDays, staples: h.staples.map(({ tokens, ...r }) => r), occasional: h.occasional.map(({ tokens, ...r }) => r), note: h.note }; })())}\n\nToday so far: ${JSON.stringify((() => { const f = dayFood(ev, today()), tt = todayTarget(ev); return { eaten: f.kcal, protein: f.protein, meals: f.meals, target: tt.kcal, proteinTarget: tt.protein, timeCairo: new Date().toLocaleTimeString('en-GB', { timeZone: CONFIG.tz, hour: '2-digit', minute: '2-digit' }), trainingToday: trainingLine(ev) }; })())}\n\nBody and food (14 days):\n${JSON.stringify(stats)}\n\nTraining:\n${JSON.stringify(training)}\n\nHis message: ${text}`,
+        content: `${history ? `Recent conversation:\n${history}\n\n` : ''}Today's logged food, exactly as stored:\n${todaysFood(ev).map(foodLine).join('\n') || 'nothing logged yet'}\n\nEverything logged, last 3 days (answer "did you get X" from this, not from food alone): ${JSON.stringify(recentLogs(ev, 3, (await allMeasurements()).filter(m => m.weight).sort((a, b) => a.date < b.date ? -1 : 1).pop()?.weight || 78))} ("calories burned" questions: use burned_estimate and say it's an estimate; never claim steps are missing when they're listed here)\n\nEating patterns, 14 days (staples vs occasional): ${JSON.stringify((() => { const h = foodHabits(ev, 14); return { loggedDays: h.loggedDays, staples: h.staples.map(({ tokens, ...r }) => r), occasional: h.occasional.map(({ tokens, ...r }) => r), note: h.note }; })())}\n\nToday so far: ${JSON.stringify((() => { const f = dayFood(ev, today()), tt = todayTarget(ev); return { eaten: f.kcal, protein: f.protein, meals: f.meals, target: tt.kcal, proteinTarget: tt.protein, timeCairo: new Date().toLocaleTimeString('en-GB', { timeZone: CONFIG.tz, hour: '2-digit', minute: '2-digit' }), trainingToday: trainingLine(ev) }; })())}\n\nBody and food (14 days):\n${JSON.stringify(stats)}\n\nTraining:\n${JSON.stringify(training)}\n\nHis message: ${text}`,
         maxTokens: 4000, effort: 'medium', tag: 'chat'
       });
       await addEvent('chat', { q: text.slice(0, 500), a: answer.slice(0, 1500) });
