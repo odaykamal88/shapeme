@@ -37,6 +37,10 @@ export default async function handler(req, res) {
     out.push('home');
   }
   // Habit nudges (first 20 days, or after a miss): one late-morning check-in nudge, one early-afternoon food nudge. Silent.
+  // Messages saved during an AI outage are retried every hour until they go through.
+  const { retryQueue } = await import('./telegram.js');
+  const retried = await retryQueue(owner).catch(() => 0);
+  if (retried) out.push(`retried ${retried}`);
   const hs = habitState(ev);
   if ((h === 10 || h === 11) && nudgeDue(hs, 'checkin') && await markSeen(`habit_checkin_${t}`)) { await send(owner, NUDGES.checkin(hs), { silent: true, markup: checkinButtons({}) }); out.push('checkin nudge'); }
   if ((h === 14 || h === 15) && nudgeDue(hs, 'food') && await markSeen(`habit_food_${t}`)) { await send(owner, NUDGES.food(hs), { silent: true }); out.push('food nudge'); }

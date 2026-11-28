@@ -49,6 +49,13 @@ export default async function handler(req, res) {
     return res.json((j.data || []).map(m => m.id).filter(id => /tts|speech|playai|orpheus|voice/i.test(id)));
   }
   if (req.query.rollup) return res.json(await rollupMonths(Number(req.query.keep) || 21)); // also runs every Sunday
+  if (req.method === 'POST' && req.body?.action === 'queue_text') { // re-queue a message that was lost in an outage (with the day he sent it), then process the queue
+    const q = (await (await import('../lib/store.js')).readDoc('retry_queue')) || [];
+    q.push({ text: String(req.body.text || '').slice(0, 2000), reply: null, date: req.body.date, tries: 0, at: Date.now() });
+    const { writeDoc } = await import('../lib/store.js'); await writeDoc('retry_queue', q);
+    const { retryQueue } = await import('./telegram.js');
+    return res.json({ processed: await retryQueue(await getOwner()) });
+  }
   if (req.query.spend) { // estimated API spend per day and per feature, last N days
     const { debugLog } = await import('../lib/store.js');
     const rows = (await debugLog(Number(req.query.spend) || 7)).filter(e => e.type === 'api_usage'), by = {};
@@ -60,7 +67,7 @@ export default async function handler(req, res) {
     const { debugLog } = await import('../lib/store.js');
     const ev = await debugLog(Number(req.query.log || req.query.misreads) || 7);
     const row = e => ({ at: new Date(e.ts).toISOString().slice(5, 16), [e.type]: e.text ?? e.signal, ...(e.kinds ? { read_as: e.kinds } : {}), ...(e.detail ? { detail: e.detail } : {}), ...(e.after ? { after: e.after } : {}) });
-    return res.json(req.query.log ? ev.map(row) : ev.filter(e => e.type === 'misread').map(row));
+    return res.json(req.query.log ? ev.filter(e => e.type !== 'api_usage').map(row) : ev.filter(e => e.type === 'misread').map(row));
   }
   if (req.query.parse) { const r = (await parseText(req.query.parse)).entries; if (!req.query.usage) return res.json(r); const { lastUsage } = await import('../lib/claude.js'); return res.json({ entries: r, usage: lastUsage }); } // how a message would be read; nothing is logged
   if (req.query.preview_place) { // GET ?preview_place=home&session=B → the rewrite, not stored

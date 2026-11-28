@@ -220,7 +220,7 @@ async function logWorkout(chat, parsed, raw) {
 }
 
 // Reads a text message with today's context (food logged, today's session and place). Exported for /api/admin?parse=.
-export async function parseText(text, replyText = null) {
+export async function parseText(text, replyText = null, sentDate = null) {
   const evNow = await recentEvents(1), foodNow = todaysFood(evNow), foodY = yesterdaysFood(evNow);
   const fixing = await readDoc('fixing'), fixEntry = fixing && Date.now() - fixing.at < 15 * 60e3 ? [...foodNow, ...foodY].find(e => String(e.ts) === String(fixing.ts)) : null;
   const fixNo = fixEntry ? (fixEntry.date === today() ? foodNow.indexOf(fixEntry) + 1 : foodY.indexOf(fixEntry) + 101) : null;
@@ -231,7 +231,7 @@ export async function parseText(text, replyText = null) {
   const reply = await ask({
     system: textSystem({ catalog: PARSER_CATALOG, todaySession: `${todaySession.key} (${todaySession.name})`, todayFood: `${foodNow.map(foodLine).join('\n') || '(nothing yet today)'}\nYesterday (${yday()}), numbered from 101 (replacing one keeps its date):\n${foodY.map((e, i) => foodLine(e, i + 100)).join('\n') || '(nothing)'}${fixNo ? `\nHE TAPPED FIX ON #${fixNo}: his message corrects that entry -> food, action "replace", replaces ${fixNo}, the FULL corrected meal (keep every item he didn't change).` : ''}`,
       todayState: `${placeNow ? `today's gym session ${placeNow.key || ''} is already rebuilt as "${placeNow.days[0].name}" for ${placeNow.where}` : `today's gym session is ${todaySession.name} at the gym`}\nTODAY'S PLAN: ${[...dayPlan(evNow, today()).exercises, ...(homeFor(today(), evNow).dayType ? homeFor(today(), evNow).exercises : [])].map(e => `${e.id || e.plan_id || 'custom'}: ${e.name} ${e.target}`).join('; ')}\nLAST THING YOU ASKED HIM: ${lp && lpMin < 240 ? `${lp.kind} (${lpMin} min ago)` : 'nothing recent'}; morning routine ${routineDone ? 'already logged' : 'not logged yet'}.\nAlready logged today: ${evNow.filter(e => e.type === 'workout' && e.date === today()).map(e => `${e.session}: ${(e.exercises || []).map(x => x.name).join(', ')}`).join(' | ') || 'nothing'}` }),
-    content: `Today is ${today()}, time ${hhmm(Date.now())}.${replyText ? `\nHe is replying to your message: "${replyText.slice(0, 600)}"` : ''}\nMessage: ${text}`,
+    content: `${sentDate && sentDate !== today() ? `He sent this on ${sentDate} and it is being processed late (the service was down): read "today"/"yesterday" relative to ${sentDate} and set "date" explicitly on every food, steps and workout entry.\n` : ''}Today is ${today()}, time ${hhmm(Date.now())}.${replyText ? `\nHe is replying to your message: "${replyText.slice(0, 600)}"` : ''}\nMessage: ${text}`,
     maxTokens: 8000, schema: TEXT, effort: 'low', tag: 'parse'
   });
   const entries = reply.entries || (reply.entry ? [reply.entry] : [reply]);
@@ -324,6 +324,21 @@ function skillsText(events) {
   }).join('\n');
 }
 
+// Retry queue (doc `retry_queue`): messages that failed because the AI service was down, replayed later with their sent date.
+const OUTAGE = /credit balance|overloaded|rate.?limit|Claude API (429|5\d\d)|fetch failed|ECONN|timed? ?out/i;
+async function queueRetry(item) {
+  const q = (await readDoc('retry_queue')) || [];
+  if (item.tries <= 5) q.push({ ...item, at: Date.now() });
+  await writeDoc('retry_queue', q.filter(x => Date.now() - x.at < 3 * 864e5).slice(-20));
+}
+export async function retryQueue(chat) {
+  const q = (await readDoc('retry_queue')) || [];
+  if (!q.length) return 0;
+  await writeDoc('retry_queue', []);
+  for (const it of q) await handle({ chat: { id: chat }, message_id: 0, text: it.text, ...(it.reply ? { reply_to_message: { text: it.reply } } : {}) }, { replay: true, sentDate: it.date, tries: it.tries });
+  return q.length;
+}
+
 async function handle(msg, opts = {}) {
   const chat = msg.chat.id;
   let text = (msg.text || msg.caption || '').trim();
@@ -337,6 +352,7 @@ async function handle(msg, opts = {}) {
     return send(chat, 'Send /start to claim this bot.');
   }
   if (owner !== chat) return; // ignore everyone else
+  if (!opts.replay) await retryQueue(chat).catch(e => console.error('retry', e)); // anything saved during an outage goes first
 
   await typing(chat);
 
@@ -444,12 +460,22 @@ async function handle(msg, opts = {}) {
 
   if (!text) return send(chat, 'Send a photo or text.');
 
-  const { entries, foodNow, placeNow, evNow: evParsed, fixEntry } = await parseText(text, msg.reply_to_message?.text);
+  let parsedMsg;
+  try { parsedMsg = await parseText(text, msg.reply_to_message?.text, opts.sentDate); }
+  catch (e) {
+    // AI service down (no credits, overloaded, 5xx): keep the message and log it automatically once it's back.
+    if (!OUTAGE.test(String(e.message))) throw e;
+    await queueRetry({ text, reply: msg.reply_to_message?.text || null, date: opts.sentDate || today(), tries: (opts.tries || 0) + 1 });
+    if (!opts.replay) await send(chat, "⏸ Couldn't process that right now (the AI service is unavailable). It's saved, and I'll log it automatically as soon as it's back.");
+    return;
+  }
+  const { entries, foodNow, placeNow, evNow: evParsed, fixEntry } = parsedMsg;
   if (CORRECTION.test(text.trim())) await misread('correction', text);
   waitUntil(addEvent('inbound', { text: text.slice(0, 500), kinds: entries.map(e => e.kind), kind: entries[0]?.kind }).catch(() => {}));
   for (const parsed of entries) await dispatch(parsed);
 
   async function dispatch(parsed) {
+  if (opts.sentDate && !parsed.date && ['food', 'steps', 'workout'].includes(parsed.kind)) parsed.date = opts.sentDate; // a late replay keeps the day he meant
   switch (parsed.kind) {
     case 'food': {
       // A reply after tapping Fix always corrects that entry, never adds a new one.
