@@ -29,6 +29,13 @@ export default async function handler(req, res) {
     if (!fresh) return res.json({ skipped: 'nothing new since the last review', imported });
     if (await overBudget()) return res.json({ skipped: 'daily AI budget reached', imported });
   }
+  // Progress photos sent today → body-fat estimate (sharpens the resting-burn formula). Once per photo day.
+  let bodyFat = null;
+  if (req.query.dry !== '1') {
+    const { listPhotos, allMeasurements, markSeen } = await import('../lib/store.js'), { today } = await import('../lib/config.js');
+    if ((await listPhotos()).some(p => p.split('/').pop().startsWith(today())) && await markSeen(`bodyfat_${today()}`))
+      bodyFat = await (await import('../lib/progress.js')).estimateBodyFat(today(), await allMeasurements()).catch(e => { console.error('bodyfat', e); return null; });
+  }
   const out = await nightlyImprove({ dry: req.query.dry === '1' });
-  res.json(req.query.dry === '1' ? out : { applied: out.applied, focus: out.focus, imported });
+  res.json(req.query.dry === '1' ? out : { applied: out.applied, focus: out.focus, imported, bodyFat });
 }
